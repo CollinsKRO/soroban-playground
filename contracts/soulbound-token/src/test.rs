@@ -1,5 +1,7 @@
 #![cfg(test)]
 
+extern crate std;
+
 use super::{SoulboundToken, SoulboundTokenClient};
 use crate::types::{ClaimStatus, Error};
 use ed25519_dalek::{Signer, SigningKey};
@@ -54,7 +56,7 @@ fn register_issuer(
 ) -> (Address, SigningKey, BytesN<32>) {
     let issuer = Address::generate(env);
     let (signing, pubkey) = test_keypair(env, seed);
-    client.register_issuer(&admin, &issuer, &pubkey);
+    client.register_issuer(admin, &issuer, &pubkey);
     (issuer, signing, pubkey)
 }
 
@@ -632,11 +634,7 @@ fn test_guardian_cannot_approve_twice() {
     let g2 = Address::generate(&env);
     let g3 = Address::generate(&env);
 
-    client.set_guardians(
-        &owner,
-        &guardians(&env, &[g1.clone(), g2, g3]),
-        &3u32,
-    );
+    client.set_guardians(&owner, &guardians(&env, &[g1.clone(), g2, g3]), &3u32);
     client.start_recovery(&g1, &owner, &new_owner);
     let result = client.try_approve_recovery(&g1, &owner);
     assert!(matches!(result, Err(Ok(Error::AlreadyApproved))));

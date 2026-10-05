@@ -69,12 +69,10 @@ impl SoulboundToken {
     }
 
     /// Transfer admin rights to a new address (admin only).
-    pub fn transfer_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        let admin = get_admin(&env)?;
-        admin.require_auth();
+    pub fn transfer_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), Error> {
+        assert_admin(&env, &admin)?;
         set_admin(&env, &new_admin);
-        env.events()
-            .publish((symbol_short!("adm_tx"),), new_admin);
+        env.events().publish((symbol_short!("adm_tx"),), new_admin);
         Ok(())
     }
 
@@ -90,26 +88,29 @@ impl SoulboundToken {
 
     /// Register an issuer together with its ed25519 signing key. Only the
     /// admin may register issuers.
-    pub fn register_issuer(env: Env, issuer: Address, pubkey: BytesN<32>) -> Result<(), Error> {
-        require_admin(&env)?;
+    pub fn register_issuer(
+        env: Env,
+        admin: Address,
+        issuer: Address,
+        pubkey: BytesN<32>,
+    ) -> Result<(), Error> {
+        assert_admin(&env, &admin)?;
         if is_issuer(&env, &issuer) {
             return Err(Error::IssuerAlreadyRegistered);
         }
         set_issuer(&env, &issuer, &pubkey);
-        env.events()
-            .publish((symbol_short!("iss_reg"),), issuer);
+        env.events().publish((symbol_short!("iss_reg"),), issuer);
         Ok(())
     }
 
     /// Remove an issuer. Existing attestations remain valid history. Admin only.
-    pub fn remove_issuer(env: Env, issuer: Address) -> Result<(), Error> {
-        require_admin(&env)?;
+    pub fn remove_issuer(env: Env, admin: Address, issuer: Address) -> Result<(), Error> {
+        assert_admin(&env, &admin)?;
         if !is_issuer(&env, &issuer) {
             return Err(Error::UnknownIssuer);
         }
         remove_issuer(&env, &issuer);
-        env.events()
-            .publish((symbol_short!("iss_rm"),), issuer);
+        env.events().publish((symbol_short!("iss_rm"),), issuer);
         Ok(())
     }
 
@@ -176,7 +177,7 @@ impl SoulboundToken {
         let id = get_attestation_count(&env)
             .checked_add(1)
             .ok_or(Error::ArithmeticOverflow)?;
-        let proof_hash = env.crypto().sha256(&payload);
+        let proof_hash = env.crypto().sha256(&payload).into();
 
         let attestation = Attestation {
             id,
@@ -407,10 +408,8 @@ impl SoulboundToken {
         };
         set_recovery(&env, &request);
 
-        env.events().publish(
-            (symbol_short!("rec_str"),),
-            (caller, owner, new_owner),
-        );
+        env.events()
+            .publish((symbol_short!("rec_str"),), (caller, owner, new_owner));
         Ok(())
     }
 
@@ -446,10 +445,8 @@ impl SoulboundToken {
         let executed = request.executed;
         set_recovery(&env, &request);
 
-        env.events().publish(
-            (symbol_short!("rec_app"),),
-            (guardian, owner, executed),
-        );
+        env.events()
+            .publish((symbol_short!("rec_app"),), (guardian, owner, executed));
         Ok(())
     }
 
@@ -464,8 +461,7 @@ impl SoulboundToken {
             return Err(Error::RecoveryAlreadyExecuted);
         }
         remove_recovery(&env, &owner);
-        env.events()
-            .publish((symbol_short!("rec_cnl"),), owner);
+        env.events().publish((symbol_short!("rec_cnl"),), owner);
         Ok(())
     }
 
@@ -483,9 +479,13 @@ fn assert_initialized(env: &Env) -> Result<(), Error> {
     Ok(())
 }
 
-fn require_admin(env: &Env) -> Result<(), Error> {
+fn assert_admin(env: &Env, caller: &Address) -> Result<(), Error> {
+    assert_initialized(env)?;
+    caller.require_auth();
     let admin = get_admin(env)?;
-    admin.require_auth();
+    if *caller != admin {
+        return Err(Error::Unauthorized);
+    }
     Ok(())
 }
 

@@ -39,9 +39,9 @@ fn setup_single_leaf(
     payload: &[u8],
 ) -> (Address, BytesN<32>) {
     let relayer = Address::generate(env);
-    client.register_relayer(&admin, &relayer, &true);
+    client.register_relayer(admin, &relayer, &true);
     let root = client.compute_leaf(&CHAIN_ID, &nonce, &b(env, payload));
-    client.set_chain_config(&admin, &CHAIN_ID, &root, &true);
+    client.set_chain_config(admin, &CHAIN_ID, &root, &true);
     (relayer, root)
 }
 
@@ -122,7 +122,10 @@ fn test_set_chain_config_and_rotate_root() {
 
     let new_root = client.compute_leaf(&CHAIN_ID, &0u64, &b(&env, b"other"));
     client.set_merkle_root(&admin, &CHAIN_ID, &new_root);
-    assert_eq!(client.get_chain_config(&CHAIN_ID).unwrap().merkle_root, new_root);
+    assert_eq!(
+        client.get_chain_config(&CHAIN_ID).unwrap().merkle_root,
+        new_root
+    );
 }
 
 #[test]
@@ -149,13 +152,8 @@ fn test_execute_single_leaf_message() {
     let (relayer, _root) = setup_single_leaf(&env, &client, &admin, 0, payload);
 
     let empty: Vec<BytesN<32>> = Vec::new(&env);
-    let refund = client.execute_cross_chain_message(
-        &relayer,
-        &CHAIN_ID,
-        &0u64,
-        &b(&env, payload),
-        &empty,
-    );
+    let refund =
+        client.execute_cross_chain_message(&relayer, &CHAIN_ID, &0u64, &b(&env, payload), &empty);
 
     assert_eq!(refund, expected_refund(payload.len() as u32));
     assert!(client.is_nonce_processed(&CHAIN_ID, &0));
@@ -202,7 +200,7 @@ fn test_execute_rejects_invalid_proof() {
     client.register_relayer(&admin, &relayer, &true);
 
     let leaf = client.compute_leaf(&CHAIN_ID, &0u64, &b(&env, b"payload"));
-    let wrong = client.compute_leaf(&CHAIN_ID, &0u64, &b(&env, b"wrong"));
+    let _wrong = client.compute_leaf(&CHAIN_ID, &0u64, &b(&env, b"wrong"));
     client.set_chain_config(&admin, &CHAIN_ID, &leaf, &true);
 
     let empty: Vec<BytesN<32>> = Vec::new(&env);
@@ -294,7 +292,7 @@ fn test_execute_while_paused_fails() {
     let (env, client, admin) = setup();
     let payload = b"paused";
     let (relayer, _root) = setup_single_leaf(&env, &client, &admin, 0, payload);
-    client.set_paused(&true);
+    client.set_paused(&admin, &true);
 
     let empty: Vec<BytesN<32>> = Vec::new(&env);
     let result = client.try_execute_cross_chain_message(
@@ -392,13 +390,8 @@ fn test_congestion_multiplier_scales_refund() {
     let (relayer, _root) = setup_single_leaf(&env, &client, &admin, 0, payload);
 
     let empty: Vec<BytesN<32>> = Vec::new(&env);
-    let refund = client.execute_cross_chain_message(
-        &relayer,
-        &CHAIN_ID,
-        &0u64,
-        &b(&env, payload),
-        &empty,
-    );
+    let refund =
+        client.execute_cross_chain_message(&relayer, &CHAIN_ID, &0u64, &b(&env, payload), &empty);
     assert_eq!(refund, expected_refund(payload.len() as u32) * 2);
 }
 
@@ -410,13 +403,8 @@ fn test_base_refund_is_added_and_capped() {
     let (relayer, _root) = setup_single_leaf(&env, &client, &admin, 0, payload);
     let empty: Vec<BytesN<32>> = Vec::new(&env);
 
-    let refund = client.execute_cross_chain_message(
-        &relayer,
-        &CHAIN_ID,
-        &0u64,
-        &b(&env, payload),
-        &empty,
-    );
+    let refund =
+        client.execute_cross_chain_message(&relayer, &CHAIN_ID, &0u64, &b(&env, payload), &empty);
     assert_eq!(refund, expected_refund(payload.len() as u32) + 500);
 
     // A tight cap clamps the refund.
@@ -424,13 +412,8 @@ fn test_base_refund_is_added_and_capped() {
     let payload2 = b"capped";
     let leaf = client.compute_leaf(&CHAIN_ID, &1u64, &b(&env, payload2));
     client.set_chain_config(&admin, &CHAIN_ID, &leaf, &true);
-    let refund2 = client.execute_cross_chain_message(
-        &relayer,
-        &CHAIN_ID,
-        &1u64,
-        &b(&env, payload2),
-        &empty,
-    );
+    let refund2 =
+        client.execute_cross_chain_message(&relayer, &CHAIN_ID, &1u64, &b(&env, payload2), &empty);
     assert_eq!(refund2, 1_000);
 }
 
@@ -441,13 +424,8 @@ fn test_claim_refund_credits_and_resets() {
     let (relayer, _root) = setup_single_leaf(&env, &client, &admin, 0, payload);
     let empty: Vec<BytesN<32>> = Vec::new(&env);
 
-    let refund = client.execute_cross_chain_message(
-        &relayer,
-        &CHAIN_ID,
-        &0u64,
-        &b(&env, payload),
-        &empty,
-    );
+    let refund =
+        client.execute_cross_chain_message(&relayer, &CHAIN_ID, &0u64, &b(&env, payload), &empty);
     assert_eq!(client.get_claimable_refund(&relayer), refund);
     assert_eq!(client.total_refunded(), refund);
 

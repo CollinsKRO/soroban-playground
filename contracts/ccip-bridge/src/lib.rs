@@ -33,11 +33,11 @@ mod types;
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, Vec};
 
 use crate::storage::{
-    get_admin, get_base_refund, get_chain_config, get_congestion_bps, get_gas_price, get_max_refund,
-    get_receipt, get_relayer_stats, get_total_claimed, get_total_refunded, is_initialized,
-    is_nonce_processed, is_paused, is_relayer, mark_nonce_processed, set_admin, set_base_refund,
-    set_chain_config, set_congestion_bps, set_gas_price, set_max_refund, set_paused, set_receipt,
-    set_relayer, set_relayer_stats, set_total_claimed, set_total_refunded,
+    get_admin, get_base_refund, get_chain_config, get_congestion_bps, get_gas_price,
+    get_max_refund, get_receipt, get_relayer_stats, get_total_claimed, get_total_refunded,
+    is_initialized, is_nonce_processed, is_paused, is_relayer, mark_nonce_processed, set_admin,
+    set_base_refund, set_chain_config, set_congestion_bps, set_gas_price, set_max_refund,
+    set_paused, set_receipt, set_relayer, set_relayer_stats, set_total_claimed, set_total_refunded,
 };
 use crate::types::{ChainConfig, Error, MessageReceipt, RelayerStats};
 
@@ -102,8 +102,8 @@ impl CcipBridge {
     // ── Admin controls ────────────────────────────────────────────────────────
 
     /// Pause or unpause message execution.
-    pub fn set_paused(env: Env, paused: bool) -> Result<(), Error> {
-        require_admin(&env)?;
+    pub fn set_paused(env: Env, admin: Address, paused: bool) -> Result<(), Error> {
+        assert_admin(&env, &admin)?;
         set_paused(&env, paused);
         env.events().publish((symbol_short!("paused"),), paused);
         Ok(())
@@ -114,8 +114,13 @@ impl CcipBridge {
     }
 
     /// Register or deregister a relayer.
-    pub fn register_relayer(env: Env, relayer: Address, active: bool) -> Result<(), Error> {
-        require_admin(&env)?;
+    pub fn register_relayer(
+        env: Env,
+        admin: Address,
+        relayer: Address,
+        active: bool,
+    ) -> Result<(), Error> {
+        assert_admin(&env, &admin)?;
         set_relayer(&env, &relayer, active);
         env.events()
             .publish((symbol_short!("relayer"),), (relayer, active));
@@ -129,11 +134,12 @@ impl CcipBridge {
     /// Create or replace the configuration for a source chain.
     pub fn set_chain_config(
         env: Env,
+        admin: Address,
         chain_id: u64,
         merkle_root: BytesN<32>,
         enabled: bool,
     ) -> Result<(), Error> {
-        require_admin(&env)?;
+        assert_admin(&env, &admin)?;
         let config = ChainConfig {
             chain_id,
             merkle_root,
@@ -147,21 +153,24 @@ impl CcipBridge {
     }
 
     /// Rotate the Merkle root of an existing chain configuration.
-    pub fn set_merkle_root(env: Env, chain_id: u64, merkle_root: BytesN<32>) -> Result<(), Error> {
-        require_admin(&env)?;
-        let mut config = get_chain_config(&env, chain_id)
-            .ok_or(Error::ChainNotConfigured)?;
+    pub fn set_merkle_root(
+        env: Env,
+        admin: Address,
+        chain_id: u64,
+        merkle_root: BytesN<32>,
+    ) -> Result<(), Error> {
+        assert_admin(&env, &admin)?;
+        let mut config = get_chain_config(&env, chain_id).ok_or(Error::ChainNotConfigured)?;
         config.merkle_root = merkle_root;
         config.updated_at = env.ledger().timestamp();
         set_chain_config(&env, &config);
-        env.events()
-            .publish((symbol_short!("root"),), chain_id);
+        env.events().publish((symbol_short!("root"),), chain_id);
         Ok(())
     }
 
     /// Update the XLM gas price used for refunds (stroops per gas unit).
-    pub fn set_gas_price(env: Env, gas_price: i128) -> Result<(), Error> {
-        require_admin(&env)?;
+    pub fn set_gas_price(env: Env, admin: Address, gas_price: i128) -> Result<(), Error> {
+        assert_admin(&env, &admin)?;
         if gas_price <= 0 {
             return Err(Error::InvalidGasPrice);
         }
@@ -170,8 +179,8 @@ impl CcipBridge {
     }
 
     /// Update the flat base refund added to every delivery.
-    pub fn set_base_refund(env: Env, base_refund: i128) -> Result<(), Error> {
-        require_admin(&env)?;
+    pub fn set_base_refund(env: Env, admin: Address, base_refund: i128) -> Result<(), Error> {
+        assert_admin(&env, &admin)?;
         if base_refund < 0 {
             return Err(Error::InvalidRefundConfig);
         }
@@ -180,8 +189,8 @@ impl CcipBridge {
     }
 
     /// Update the maximum refund payable for a single delivery.
-    pub fn set_max_refund(env: Env, max_refund: i128) -> Result<(), Error> {
-        require_admin(&env)?;
+    pub fn set_max_refund(env: Env, admin: Address, max_refund: i128) -> Result<(), Error> {
+        assert_admin(&env, &admin)?;
         if max_refund < 0 {
             return Err(Error::InvalidRefundConfig);
         }
@@ -190,8 +199,8 @@ impl CcipBridge {
     }
 
     /// Update the congestion multiplier in basis points (`10_000` = 1x).
-    pub fn set_congestion_bps(env: Env, bps: u32) -> Result<(), Error> {
-        require_admin(&env)?;
+    pub fn set_congestion_bps(env: Env, admin: Address, bps: u32) -> Result<(), Error> {
+        assert_admin(&env, &admin)?;
         if bps > MAX_CONGESTION_BPS {
             return Err(Error::InvalidCongestion);
         }
@@ -246,8 +255,7 @@ impl CcipBridge {
             return Err(Error::ProofTooDeep);
         }
 
-        let config = get_chain_config(&env, source_chain_id)
-            .ok_or(Error::ChainNotConfigured)?;
+        let config = get_chain_config(&env, source_chain_id).ok_or(Error::ChainNotConfigured)?;
         if !config.enabled {
             return Err(Error::ChainDisabled);
         }
@@ -265,7 +273,7 @@ impl CcipBridge {
         mark_nonce_processed(&env, source_chain_id, nonce);
 
         let refund = compute_refund(&env, message_payload.len())?;
-        let payload_hash = env.crypto().sha256(&message_payload);
+        let payload_hash = env.crypto().sha256(&message_payload).into();
         let receipt = MessageReceipt {
             source_chain_id,
             nonce,
@@ -387,9 +395,13 @@ fn assert_initialized(env: &Env) -> Result<(), Error> {
     Ok(())
 }
 
-fn require_admin(env: &Env) -> Result<(), Error> {
+fn assert_admin(env: &Env, caller: &Address) -> Result<(), Error> {
+    assert_initialized(env)?;
+    caller.require_auth();
     let admin = get_admin(env)?;
-    admin.require_auth();
+    if *caller != admin {
+        return Err(Error::Unauthorized);
+    }
     Ok(())
 }
 
@@ -398,7 +410,7 @@ fn leaf_hash(env: &Env, chain_id: u64, nonce: u64, payload: &Bytes) -> BytesN<32
     preimage.append(&Bytes::from_array(env, &chain_id.to_be_bytes()));
     preimage.append(&Bytes::from_array(env, &nonce.to_be_bytes()));
     preimage.append(payload);
-    env.crypto().sha256(&preimage)
+    env.crypto().sha256(&preimage).into()
 }
 
 /// Commutative `sha256(min(a,b) || max(a,b))`, matching OpenZeppelin-style
@@ -414,16 +426,11 @@ fn pair_hash(env: &Env, a: &BytesN<32>, b: &BytesN<32>) -> BytesN<32> {
     let mut buffer = Bytes::new(env);
     buffer.append(&Bytes::from_array(env, &first));
     buffer.append(&Bytes::from_array(env, &second));
-    env.crypto().sha256(&buffer)
+    env.crypto().sha256(&buffer).into()
 }
 
 /// Verify `leaf` against `root` given an ordered sibling proof.
-fn verify_merkle(
-    env: &Env,
-    root: &BytesN<32>,
-    leaf: &BytesN<32>,
-    proof: &Vec<BytesN<32>>,
-) -> bool {
+fn verify_merkle(env: &Env, root: &BytesN<32>, leaf: &BytesN<32>, proof: &Vec<BytesN<32>>) -> bool {
     let mut computed = leaf.clone();
     for sibling in proof.iter() {
         computed = pair_hash(env, &computed, &sibling);
