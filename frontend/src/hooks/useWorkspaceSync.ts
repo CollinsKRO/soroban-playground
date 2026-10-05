@@ -25,7 +25,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOffline } from "@/components/providers/OfflineProvider";
-import { describeConflict, mergeSnapshots } from "@/lib/sync/merge";
+import { describeConflict, emptySnapshot, mergeSnapshots } from "@/lib/sync/merge";
 import { fetchWorkspace } from "@/lib/sync/workspaceClient";
 import {
   applyLocalMutation,
@@ -117,16 +117,22 @@ export function useWorkspaceSync({
   debounceMs = DEFAULT_DEBOUNCE_MS,
 }: WorkspaceSyncOptions): WorkspaceSyncValue {
   const offline = useOffline();
-  const deviceId = useMemo(resolveDeviceId, []);
 
   const bucket = useMemo(
     () => workspaceBucket(walletAddress),
     [walletAddress],
   );
 
+  // #1369 — `readWorkspace` hits `localStorage` synchronously and
+  // `resolveDeviceId` may write a fresh id. Seeding `useState` from either
+  // makes the first client render depend on browser storage the server never
+  // saw (a favorites count the server could not produce) and trips a
+  // hydration mismatch. Render the canonical empty snapshot until the mount
+  // effect below adopts the persisted bucket.
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>(() =>
-    readWorkspace(bucket),
+    emptySnapshot(),
   );
+  const [deviceId, setDeviceId] = useState<string>("server");
   const [status, setStatus] = useState<WorkspaceSyncStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -232,10 +238,15 @@ export function useWorkspaceSync({
     await refresh();
   }, [commit, refresh]);
 
+  // Adopt the persisted bucket only after mount (#1369). The first render uses
+  // the canonical empty snapshot so the server HTML and the hydration pass
+  // agree; storage is read here where it cannot perturb hydration.
+  useEffect(() => {
+    setDeviceId(resolveDeviceId());
+  }, []);
+
   // Adopt the local bucket for the connected account, then reconcile.
   useEffect(() => {
-    if (!walletAddress) return;
-    rememberActiveBucket(walletAddress);
     const local = readWorkspace(bucket);
     // Seed the ref *synchronously* so the reconcile below merges the new
     // account's copy rather than the previous wallet's still-rendered state.
@@ -244,6 +255,8 @@ export function useWorkspaceSync({
     setConflicts([]);
     setError(null);
     setStatus("idle");
+    if (!walletAddress) return;
+    rememberActiveBucket(walletAddress);
     if (enabled) void reconcile(local);
     // `reconcile` is intentionally excluded: it changes on every engine emission
     // and re-running it on each one would loop.

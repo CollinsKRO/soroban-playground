@@ -296,9 +296,13 @@ export function useEditorHistory(
       }
       conflictRef.current = null;
       setConflict(null);
-      channelRef.current?.postMessage({
-        snapshot: result.snapshot,
-      });
+      // `applySaveResult` returns false for the "conflict" variant, so reaching
+      // this point guarantees a snapshot is present to broadcast.
+      if (result.kind !== "conflict") {
+        channelRef.current?.postMessage({
+          snapshot: result.snapshot,
+        });
+      }
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Unable to resolve this conflict",

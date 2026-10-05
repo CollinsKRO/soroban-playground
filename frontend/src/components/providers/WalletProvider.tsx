@@ -108,6 +108,10 @@ function parsePersistedSession(value: string | null): PersistedWalletSession | n
 }
 
 function readPersistedSession(): PersistedWalletSession | null {
+  // #1369 — never touch `window` during the server render. All callers run
+  // inside effects or event handlers, but the guard keeps the helper safe if
+  // the call graph ever changes and makes the SSR contract explicit.
+  if (typeof window === "undefined") return null;
   try {
     return parsePersistedSession(window.localStorage.getItem(SESSION_STORAGE_KEY));
   } catch {
@@ -138,6 +142,10 @@ function walletErrorMessage(error: unknown, fallback: string): string {
 }
 
 function getConfiguredNetwork() {
+  // #1369 — SSR guard: the server has no `localStorage`, so always fall back
+  // to testnet during pre-render. The client adopts the stored network after
+  // mount via the ledger-sync effect / explicit `connect`.
+  if (typeof window === "undefined") return NETWORK_CONFIG.testnet;
   try {
     const networkId = window.localStorage.getItem("soroban_playground_network");
     if (networkId && NETWORK_CONFIG[networkId]) return NETWORK_CONFIG[networkId];
@@ -287,7 +295,7 @@ export interface WalletAccount {
   isMultisig?: boolean;
 }
 
-interface WalletContextType {
+export interface WalletContextType {
   activeWallet: WalletType | null;
   activeAccount: string | null;
   address: string | null; // Alias for activeAccount
@@ -310,6 +318,15 @@ interface WalletContextType {
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
+/**
+ * SSR-safe wallet initialization (#1369).
+ *
+ * The initial state is deliberately static (`idle` / `null` / empty) so the
+ * server render and the hydration pass always agree. The persisted session,
+ * the stored network and the detected browser wallets are adopted in mount
+ * effects below — never during render — so direct `window`/`localStorage`
+ * access can never leak into the server HTML or cause a layout shift.
+ */
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [activeWallet, setActiveWallet] = useState<WalletType | null>(null);
   const [activeAccount, setActiveAccount] = useState<string | null>(null);
