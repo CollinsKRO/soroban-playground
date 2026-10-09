@@ -36,10 +36,20 @@ interface EventsPanelProps {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const DEFAULT_WS_URL =
-  typeof window !== "undefined"
-    ? `ws://${window.location.hostname}:3001/ws/events`
-    : "ws://localhost:3001/ws/events";
+/**
+ * Resolve the event stream endpoint lazily.
+ *
+ * #1369 — reading `window.location` at module scope is evaluated once, when the
+ * module is first imported. On the server that happens before any request context
+ * exists, so the resolved value (`localhost`) would be baked into the client bundle
+ * and a user served from any other host would try to connect to their own machine.
+ * Resolving per render keeps the server and the client in agreement and lets the
+ * real hostname win in the browser.
+ */
+function resolveDefaultWsUrl(): string {
+  if (typeof window === "undefined") return "ws://localhost:3001/ws/events";
+  return `ws://${window.location.hostname}:3001/ws/events`;
+}
 
 function formatLedger(n: number): string {
   return `#${n.toLocaleString()}`;
@@ -148,16 +158,20 @@ function EventRow({ event }: { event: WsEvent }) {
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
 export function EventsPanel({
-  wsUrl = DEFAULT_WS_URL,
+  wsUrl,
   restUrl,
   contractId,
   eventType,
   maxEvents = 200,
   className = "",
 }: EventsPanelProps) {
+  // Resolved once per render, but only ever *read* inside the stream hook's
+  // effect, so the browser hostname is used and the server render stays inert.
+  const resolvedWsUrl = useMemo(() => wsUrl ?? resolveDefaultWsUrl(), [wsUrl]);
+
   const { events, status, droppedCount, clearEvents, reconnect } =
     useEventStream({
-      url: wsUrl,
+      url: resolvedWsUrl,
       contractId,
       eventType,
       fallbackRestUrl: restUrl,

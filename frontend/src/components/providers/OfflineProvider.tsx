@@ -14,6 +14,7 @@
 
 import React from "react";
 import { createOfflineEngine, type OfflineEngine } from "@/lib/offline/engine";
+import { INITIAL_OFFLINE_ENGINE_STATE } from "@/lib/offline/types";
 import {
   connectivityProbeUrl,
   fetchWorkspace,
@@ -83,34 +84,40 @@ function writeLocalSnapshot(
 }
 
 export function OfflineProvider({ children }: { children: React.ReactNode }) {
-  const engineRef = React.useRef<OfflineEngine | null>(null);
-  if (engineRef.current === null) {
-    engineRef.current = createOfflineEngine({
-      probeUrl: connectivityProbeUrl(),
-      probeIntervalMs: 30_000,
-    });
-  }
-  const engine = engineRef.current;
-
-  const [state, setState] = React.useState<OfflineEngineState>(() =>
-    engine.getState(),
+  // #1369 — the engine must not be built during render. `createOfflineEngine`
+  // reads its persisted outbox from localStorage as part of construction, so
+  // constructing it in the render body makes the first client render depend on
+  // browser storage the server never saw (a queued count the server could not
+  // produce) and trips a hydration mismatch. It is therefore created in the
+  // effect below, once we know we are past the hydration pass, and the tree
+  // renders the canonical initial state until then.
+  const [engine, setEngine] = React.useState<OfflineEngine | null>(null);
+  const [state, setState] = React.useState<OfflineEngineState>(
+    INITIAL_OFFLINE_ENGINE_STATE,
   );
 
   React.useEffect(() => {
-    engine.start();
-    return engine.subscribe(setState);
-  }, [engine]);
+    const created = createOfflineEngine({
+      probeUrl: connectivityProbeUrl(),
+      probeIntervalMs: 30_000,
+    });
+    // Adopt the persisted outbox and begin probing only after mount, so the
+    // server-rendered markup stays authoritative for the hydration pass.
+    setState(created.getState());
+    created.start();
+    const unsubscribe = created.subscribe(setState);
+    setEngine(created);
 
-  React.useEffect(
-    () => () => {
-      engine.destroy();
-    },
-    [engine],
-  );
+    return () => {
+      unsubscribe();
+      created.destroy();
+    };
+  }, []);
 
   // Transport for the one outbox kind the app owns. Registered for the lifetime
   // of the provider; transport failures leave the operation queued and back off.
   React.useEffect(() => {
+    if (!engine) return;
     return engine.registerHandler(WORKSPACE_PUSH_KIND, async (operation) => {
       const payload = operation.payload as
         | ({ walletAddress?: string } & WorkspaceSnapshot)
@@ -161,14 +168,17 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       queuedCount: state.outbox.operations.length,
       isDraining: state.draining,
       conflicts: state.conflicts,
-      enqueue: (id, kind, payload) => engine.enqueue(id, kind, payload),
-      flush: () => engine.flush(),
-      setStatus: (status) => engine.setStatus(status),
-      discard: (id) => engine.discard(id),
-      recordConflicts: (conflicts) => engine.recordConflicts(conflicts),
-      clearConflicts: () => engine.clearConflicts(),
+      // Before the engine exists (server render, and the first client render
+      // before the mount effect) there is nothing to talk to. These no-ops keep
+      // the context shape stable so consumers never have to null-check.
+      enqueue: (id, kind, payload) => engine?.enqueue(id, kind, payload),
+      flush: async () => (engine ? engine.flush() : state),
+      setStatus: (status) => engine?.setStatus(status),
+      discard: (id) => engine?.discard(id) ?? false,
+      recordConflicts: (conflicts) => engine?.recordConflicts(conflicts),
+      clearConflicts: () => engine?.clearConflicts(),
       queueWorkspacePush: (walletAddress, snapshot) => {
-        engine.enqueue(workspacePushId(walletAddress), WORKSPACE_PUSH_KIND, {
+        engine?.enqueue(workspacePushId(walletAddress), WORKSPACE_PUSH_KIND, {
           walletAddress,
           ...snapshot,
         });

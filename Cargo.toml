@@ -30,6 +30,7 @@ members = [
     "contracts/allowlist",
     "contracts/amm-pool",
     "contracts/analysis-utils",
+    "contracts/concentrated-liquidity",
     "contracts/bounty-dispute",
     "contracts/bug-bounty",
     "contracts/carbon-credit",
@@ -168,6 +169,7 @@ tokio = { version = "1", features = ["full"] }
 #   * Soroban WASM contracts -> size-critical (<64KB upload limit),
 #     no unwinding, stripped symbols.
 #   * Long-running native services (`indexer`) -> speed-orimised, unwinding
+#   * Long-running native services (`indexer`) -> speed-optimised, unwinding
 #     panics so a single tokio task failure does not abort the process.
 # The `[rprofile.release]` profile remains the default for the WASM target
 # (cargo build --release --target wasm32-unknown-unknown) and is validated
