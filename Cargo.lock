@@ -1253,6 +1253,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "concentrated-liquidity"
+version = "0.1.0"
+dependencies = [
+ "common-math",
+ "proptest",
+ "soroban-sdk 21.7.7",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5080,6 +5089,13 @@ dependencies = [
 
 [[package]]
 name = "soroban-tokenized-reit"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 21.7.7",
+]
+
+[[package]]
+name = "soroban-twamm"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk 21.7.7",
